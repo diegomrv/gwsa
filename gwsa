@@ -1,0 +1,95 @@
+#!/usr/bin/env zsh
+# gwsa — multi-account wrapper around `gws` (Google Workspace CLI).
+#
+# Picks a per-account config dir under ./credentials/<account>/ and forwards
+# to `gws` with GOOGLE_WORKSPACE_CLI_CONFIG_DIR set. See README.md.
+
+set -eu
+
+script_dir="${${(%):-%x}:A:h}"
+creds_root="$script_dir/credentials"
+client_secret="$script_dir/client_secret.json"
+
+die() { print -u2 -- "gwsa: $1"; exit "${2:-1}"; }
+
+require_gws() {
+  if ! command -v gws >/dev/null 2>&1; then
+    print -u2 -- "gwsa: \`gws\` not found on PATH."
+    print -u2 -- "Install the Google Workspace CLI: https://github.com/googleworkspace/cli"
+    exit 127
+  fi
+}
+
+list_accounts() {
+  [[ -d "$creds_root" ]] || return 0
+  for d in "$creds_root"/*(N/); do
+    print -- "${d:t}"
+  done
+}
+
+cmd_accounts() {
+  list_accounts
+}
+
+cmd_setup() {
+  local account="${1:-}"
+  [[ -n "$account" ]] || die "usage: gwsa setup <account> [gws auth login args...]" 2
+  shift
+
+  [[ -f "$client_secret" ]] || die "missing $client_secret — see README.md (Google Cloud setup)" 2
+
+  require_gws
+
+  local dir="$creds_root/$account"
+  mkdir -p "$dir"
+
+  local link="$dir/client_secret.json"
+  if [[ ! -e "$link" && ! -L "$link" ]]; then
+    ln -s ../../client_secret.json "$link"
+  fi
+
+  GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$dir" exec gws auth login "$@"
+}
+
+cmd_whoami() {
+  local account="${1:-}"
+  [[ -n "$account" ]] || die "usage: gwsa whoami <account>" 2
+  local dir="$creds_root/$account"
+  [[ -d "$dir" ]] || die "unknown account: $account (known: $(list_accounts | paste -sd, -))" 2
+  require_gws
+  GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$dir" exec gws auth status
+}
+
+run_account() {
+  local account="$1"; shift
+  local dir="$creds_root/$account"
+  if [[ ! -d "$dir" ]]; then
+    print -u2 -- "gwsa: unknown account: $account"
+    local known
+    known="$(list_accounts | paste -sd, -)"
+    print -u2 -- "gwsa: known accounts: ${known:-<none — run \`gwsa setup <account>\`>}"
+    exit 2
+  fi
+  require_gws
+  GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$dir" exec gws "$@"
+}
+
+main() {
+  local sub="${1:-}"
+  [[ -n "$sub" ]] || {
+    print -u2 -- "usage: gwsa <account> <gws args...>"
+    print -u2 -- "       gwsa setup <account> [gws auth login args...]"
+    print -u2 -- "       gwsa accounts"
+    print -u2 -- "       gwsa whoami <account>"
+    exit 2
+  }
+  shift
+  case "$sub" in
+    accounts) cmd_accounts "$@" ;;
+    setup)    cmd_setup "$@" ;;
+    whoami)   cmd_whoami "$@" ;;
+    *)        run_account "$sub" "$@" ;;
+  esac
+}
+
+main "$@"

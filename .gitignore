@@ -1,0 +1,5 @@
+client_secret.json
+credentials/*/credentials.enc
+credentials/*/token_cache.json
+credentials/*/client_secret.json
+credentials/*/cache/
